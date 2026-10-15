@@ -1,1 +1,3 @@
 *.lua linguist-language=Lua
+# The release-art scripts (HTML/JS pages rendered to images) are tooling, not the mod: kept out of the language bar
+src/art/** linguist-documentation
