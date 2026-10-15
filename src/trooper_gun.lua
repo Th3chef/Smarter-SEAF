@@ -131,40 +131,11 @@
   end
   -- which axis of the muzzle part runs along the barrel, per weapon kind: learned while he aims steadily at his target
   -- (at least 40 frames, his aim spread over 30 degrees, the best axis matching 0.95 or better on average)
-  local function barrel_of(g, M, axes, st, s)
-    local k = g.kind
-    local known = GUN.axis[k]
-    if known then
-      local a, B = axes[known.axis], s.gun_B
-      if not B then B = {}; s.gun_B = B end
-      B[1], B[2], B[3] = a[1] * known.sign, a[2] * known.sign, a[3] * known.sign
-      -- ((1.0.1 review) a preset is checked against where he really aims (steadily on his target, not staggered): 60
-      -- samples, on average well along his aim (a wrong axis is about square to it). A wrong one is dropped and the
-      -- barrel learned instead (the EAT's was set from the other guns, never measured)
-      if known.preset and not known.checked and st.target ~= 0 and st.synced and st.aim and not STAGGER_STEP[st.node] then
-        local dx, dy, dz = st.aim[1] - M[1], st.aim[2] - M[2], st.aim[3] - M[3]
-        local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-        if l > 1 then
-          known.sum, known.n = (known.sum or 0) + (B[1] * dx + B[2] * dy + B[3] * dz) / l, (known.n or 0) + 1
-          if known.n >= 60 then
-            local mean = known.sum / known.n
-            if mean >= 0.7 then known.checked = true
-            else
-              GUN.axis[k] = nil
-              note(string.format('SEAF gun: the preset barrel of the %s does not match his aim (%.2f): learning it instead', g.name or EXT.hexr(k), mean))
-              return nil
-            end
-          end
-        end
-      end
-      return B
-    end
-    if not (st.target ~= 0 and st.synced and st.aim) then return nil end
-    local v = nrm3(st.aim[1] - M[1], st.aim[2] - M[2], st.aim[3] - M[3])
-    if not v then return nil end
+  -- learning: one sample of his aim against each axis of the muzzle part (while he aims at his target)
+  local function learn_barrel(k, g, axes, v)
     local L = GUN.learn[k]
-    if not L then L = { sums = { 0, 0, 0, 0, 0, 0 }, n = 0, d0 = v, spread = 1, tries = 0 }; GUN.learn[k] = L end
-    if L.tries >= 5 then return nil end
+    if not L then L = { sums = { 0, 0, 0, 0, 0, 0 }, n = 0, d0 = { v[1], v[2], v[3] }, spread = 1, tries = 0 }; GUN.learn[k] = L end
+    if L.tries >= 5 then return end
     for r = 1, 3 do
       local c = axes[r][1] * v[1] + axes[r][2] * v[2] + axes[r][3] * v[3]
       L.sums[2 * r - 1], L.sums[2 * r] = L.sums[2 * r - 1] + c, L.sums[2 * r] - c
@@ -182,8 +153,34 @@
       elseif TESTER then
         note(string.format('SEAF gun (test): barrel of the %s not found yet (best match %.3f)', g.name or EXT.hexr(k), mean))
       end
-      GUN.learn[k] = { sums = { 0, 0, 0, 0, 0, 0 }, n = 0, d0 = v, spread = 1, tries = L.tries }
+      GUN.learn[k] = { sums = { 0, 0, 0, 0, 0, 0 }, n = 0, d0 = { v[1], v[2], v[3] }, spread = 1, tries = L.tries }
     end
+  end
+  local function barrel_of(g, M, axes, st, s)
+    local k = g.kind
+    local known = GUN.axis[k]
+    -- (only while he aims at his target: not aboard a dropship, not staggered)
+    local aiming = st.target ~= 0 and st.synced and st.aim and not st.aboard and not STAGGER_STEP[st.node]
+    if known then
+      local a, B = axes[known.axis], s.gun_B
+      if not B then B = {}; s.gun_B = B end
+      B[1], B[2], B[3] = a[1] * known.sign, a[2] * known.sign, a[3] * known.sign
+      -- ((1.0.2) a preset is kept until a barrel is learned: the AR-23P's, the SMG's and the rifle's were measured in game
+      -- (Tests 4-5); the EAT's was only set from them. 1.0.1 checked the presets against his aim and dropped the ones that
+      -- failed - counting frames when he wasn't pointing his gun at his target - and in game it dropped all of them; the
+      -- rifle's was never learned back, and a soldier with no barrel isn't checked for pointing his gun at a friend at
+      -- all. Now the barrel is learned beside the preset (at most 5 tries) and replaces it only at a 0.95 match)
+      if known.preset and aiming then
+        local v = s.gun_v
+        if not v then v = {}; s.gun_v = v end
+        if nrm3_into(v, st.aim[1] - M[1], st.aim[2] - M[2], st.aim[3] - M[3]) then learn_barrel(k, g, axes, v) end
+      end
+      return B
+    end
+    if not aiming then return nil end
+    local v = s.gun_v
+    if not v then v = {}; s.gun_v = v end
+    if nrm3_into(v, st.aim[1] - M[1], st.aim[2] - M[2], st.aim[3] - M[3]) then learn_barrel(k, g, axes, v) end
     return nil
   end
   -- does his barrel's line (60 m out) pass a friend? Returns the body or nil; also keeps, per AI step, how often his
