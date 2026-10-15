@@ -45,7 +45,7 @@ Remove it in your mod manager, then Purge and Deploy. Nothing is left behind in 
 - Only the SEAF soldiers run by your game are changed: when you host or play solo. When you join someone else's game, their game runs the soldiers.
 - Works alongside Smarter Guard Dogs & Sentries (they're separate mods and can both be installed).
 - Don't combine it with other mods that change SEAF soldier targeting.
-- Made on the October 2026 game version.
+- Made and tested on the September 2026 game version (the late-September patch).
 
 ## Known limitations
 
@@ -53,7 +53,7 @@ Remove it in your mod manager, then Purge and Deploy. Nothing is left behind in 
 - Line of sight updates about twice a second, so a soldier may briefly fire at cover or hesitate as enemies duck in and out of view.
 - Pings count only for enemies the soldier can see; a soldier who can't get onto a pinged enemy within a couple of seconds goes back to his own fight.
 - Grenades and mines aren't steered.
-- A major game update may switch the mod off until it's updated.
+- After a game update the mod finds what it needs in the game's code again and remembers it for that game version. A part only switches itself off (changing nothing) when an update changes something it relies on, and the log says which.
 
 ## How it works
 **It doesn't alter any game data.** No game files, weapon stats, damage or enemy values are changed. It's a Lua addon built on the Smarter Guard Dogs & Sentries engine: the game's own soldier AI stays in charge, and the mod only hides the enemies a soldier shouldn't shoot from his list and asks him to pick again. No DLLs are added, no game code is patched, and everything is put back when it's not needed.
