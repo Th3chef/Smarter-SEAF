@@ -1,0 +1,6 @@
+# build outputs (made by src/build_seaf.py; the release zip is attached to GitHub Releases)
+src/build/
+__pycache__/
+*.pyc
+# logs
+*.log
