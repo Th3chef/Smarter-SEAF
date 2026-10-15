@@ -49,6 +49,7 @@ Remove it in your mod manager, then Purge and Deploy. Nothing is left behind in 
 
 ## Known limitations
 
+- **Host only:** the mod changes only the SEAF soldiers your own game runs, so it works when you host or play solo. When you join someone else's game, their game runs the soldiers and the mod leaves them alone.
 - The game still decides when to shoot and where to walk. The mod only steers who a soldier may target, so a soldier blocked by a friend waits for a clear line rather than stepping aside.
 - Line of sight updates about twice a second, so a soldier may briefly fire at cover or hesitate as enemies duck in and out of view.
 - Pings count only for enemies the soldier can see; a soldier who can't get onto a pinged enemy within a couple of seconds goes back to his own fight.
