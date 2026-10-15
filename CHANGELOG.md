@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- **Fixed:** soldiers could shoot you while staggered, getting up or swinging their gun around. To stop that, the mod has to know which way each soldier's gun points. In 1.0.1 it often threw that away early in a mission, and for the rifle it never got it back, so that protection was off for most soldiers. It now always keeps it.
+
 ## 1.0.1
 
 First release. A new brain for the SEAF soldiers run by your game:
