@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from hd2_patch import resource_hash, lua_resource, write_lua_archive
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 MODULE = 'mods/chef/smarter_seaf'
 GUID_LIVE = 'f7c3abbe-902c-41a7-8183-057a6ab15768'
 GUID_TEST = '3c821d48-50e2-40c2-85e4-2a4c6f42b870'
