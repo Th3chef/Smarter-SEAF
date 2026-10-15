@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script></head>
+<body><script type="module">
+import * as THREE from 'three';
+import { load, clean, byName, wpos } from './pose.js';
+const q=new URLSearchParams(location.search); const W=+(q.get('w')||900), H=+(q.get('h')||600), preview=q.get('preview');
+const r=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true}); r.setSize(W,H); r.setClearColor(0,preview?1:0); document.body.appendChild(r.domElement);
+const scene=new THREE.Scene(); if(preview) scene.background=new THREE.Color(0x3a3530);
+const TL=new THREE.TextureLoader(); const t=await TL.loadAsync(q.get('mc')||'matcap_gun.png'); t.colorSpace=THREE.SRGBColorSpace;
+const ch=(await load('models/cha_charger.unit.glb')).scene;
+clean(ch,/^g_body_(butt|right_back_leg|left_back_leg|head|right_front_leg|body|claw_right|claw_left|side_right|side_left|left_front_leg)$/, new THREE.MeshMatcapMaterial({matcap:t}));
+const G=new THREE.Group(); G.add(ch); G.rotation.y=+(q.get('yaw')||0); scene.add(G); G.updateMatrixWorld(true);
+const B=byName(ch); const head=B.head||B.c_head; 
+const box=new THREE.Box3(); ch.traverse(o=>{ if(o.isMesh&&o.visible){ o.geometry.computeBoundingBox(); box.union(new THREE.Box3().setFromObject(o)); }});
+const c=box.getCenter(new THREE.Vector3()), s=box.getSize(new THREE.Vector3());
+const cam=new THREE.PerspectiveCamera(+(q.get('fov')||30),W/H,0.1,200); const dist=+(q.get('dist')||14);
+cam.position.set(c.x, c.y+ +(q.get('up')||0.5), c.z+dist); cam.lookAt(c); r.render(scene,cam);
+window.INFO={box:[box.min.toArray(),box.max.toArray()], bones:Object.keys(B).filter(n=>/head|jaw|mandible|horn/.test(n)).slice(0,10)}; window.DONE=true;
+</script></body></html>

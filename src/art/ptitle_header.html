@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:Anton;src:url(fonts/anton-latin-400-normal.woff2)}
+@font-face{font-family:Barlow;font-weight:800;src:url(fonts/barlow-condensed-latin-800-normal.woff2)}
+html,body{margin:0;width:1300px;height:372px;overflow:hidden;background:#000}
+.art{position:absolute;inset:0;background:url(poster_header.png)}
+.block{position:absolute;right:0;top:44px;width:790px;height:150px;background:#121110;border-bottom:8px solid #b21a1e}
+.title{position:absolute;right:56px;top:56px;font-family:Anton;line-height:1;white-space:nowrap;letter-spacing:3px;font-size:124px}
+.title .a{color:#f6e7c1}.title .b{color:#ffc400;margin-left:20px}
+.badge{position:absolute;right:56px;top:226px;background:#121110;color:#ffc400;font:54px/1 Anton;padding:5px 16px 7px}
+.slogan{position:absolute;right:164px;top:230px;text-align:right;font-family:Anton;line-height:1;letter-spacing:1px;font-size:52px;white-space:nowrap}
+.slogan .a{color:#121110}.slogan .b{color:#b21a1e}
+</style></head><body>
+<div class="art"></div>
+<div class="block"></div>
+<div class="title" id="title"><span class="a">SMARTER</span><span class="b">SEAF</span></div>
+<div class="badge" id="badge">1.0</div>
+<div class="slogan" id="slogan"><span class="a">THEY SHOOT BUGS. </span><span class="b">NOT YOU.</span></div>
+<script>document.fonts.ready.then(()=>{const r={};document.querySelectorAll("[id]").forEach(e=>{const b=e.getBoundingClientRect();r[e.id]=[b.left|0,b.top|0,b.right|0,b.bottom|0]});window.INFO=r;window.DONE=true;});</script>
+</body></html>

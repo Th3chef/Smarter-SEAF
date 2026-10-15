@@ -1,0 +1,1 @@
+{"W": 1600, "H": 1000, "sun": [572, 240], "sun_r": 120, "rays": 30, "dot": 11, "ground": 742, "band": 770, "charger": "layers/L_charger.png", "bugs": [[1090, 150], [1250, 105], [1370, 75]], "squad": "layers/P_squad_post.png", "sq_scale": 0.8, "sq_x": 60, "sq_y": 0, "out": "poster_cover.png"}
