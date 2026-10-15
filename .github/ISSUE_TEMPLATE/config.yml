@@ -3,3 +3,6 @@ contact_links:
   - name: Download the mod
     url: https://github.com/Th3chef/Smarter-SEAF/releases/latest
     about: Get the latest Smarter-SEAF zip from the Releases page (not the source code).
+  - name: Nexus Mods page
+    url: https://www.nexusmods.com/helldivers2/mods/17384
+    about: Downloads, comments and the full description
