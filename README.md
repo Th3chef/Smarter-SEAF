@@ -34,7 +34,7 @@ Get the latest zip from the [Releases](../../releases/latest) page (the `Smarter
 ## Install / update
 
 1. Install Bingus Shared Loader v19 or newer.
-2. Add Smarter-SEAF-1.0.0.zip in Arsenal or the HD2 Mod Manager and check the options you want.
+2. Add Smarter-SEAF-1.0.1.zip in Arsenal or the HD2 Mod Manager and check the options you want.
 3. Purge, then Deploy (always both, every time you install or update), then restart the game.
 
 ## Uninstall
