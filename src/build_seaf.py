@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from hd2_patch import resource_hash, lua_resource, write_lua_archive
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 MODULE = 'mods/chef/smarter_seaf'
 GUID_LIVE = 'f7c3abbe-902c-41a7-8183-057a6ab15768'
 GUID_TEST = '3c821d48-50e2-40c2-85e4-2a4c6f42b870'
@@ -78,6 +78,23 @@ def transform(src, version, tester, test_build, research):
         "  unit_cache_n = unit_cache_n + 1\n"
         "  if unit_cache_n > 4096 then unit_cache, unit_cache_n = {}, 0 end   -- (Smarter SEAF 1.0.0 review: bounded)\n"
         "  unit_cache[id] = obj\n  return obj, h\n", 'unit cache cap')
+    src = once(src, "    if next(unit_cache) then unit_cache = {} end", "    if next(unit_cache) then unit_cache, unit_cache_n = {}, 0 end", 'unit cache wipe 1')
+    src = once(src, "      ctx, ctx_until, unit_cache, reg_rows = c, t + LOCATE_SECONDS, {}, {}\n", "      ctx, ctx_until, unit_cache, reg_rows = c, t + LOCATE_SECONDS, {}, {}\n      unit_cache_n = 0\n", 'unit cache wipe 2')
+    # (1.0.1 review) whether the layout is the known build's (the AI step numbers are from it); a scanned one is not
+    src = once(src, "    exe_units = ebase + L.exe_units, g = {}, gbase = gbase }\n", "    exe_units = ebase + L.exe_units, g = {}, gbase = gbase, known = (L == KNOWN) }\n", 'known flag')
+    # (1.0.1 review) the wielder and spot lists are taken only where their first pattern - the one holding the record
+    # layout this mod reads - agrees: after an update that changed the layout they are not found (their parts off)
+    src = once(src, "        local v = base_rva + o + p.size + si32(txt, o + p.disp_at)\n",
+        "        local v = base_rva + o + p.size + si32(txt, o + p.disp_at)\n        if p.layout then layout_v = v end\n", 'layout vote')
+    src = once(src, "  local function target(txt, base_rva, pats, what)\n    local votes, order = {}, {}\n",
+        "  local function target(txt, base_rva, pats, what)\n    local votes, order, layout_v = {}, {}, nil\n", 'layout local')
+    src = once(src, "    assert(not tie, what .. ': patterns disagree')\n",
+        "    assert(not tie, what .. ': patterns disagree')\n"
+        "    for _, p in ipairs(pats) do if p.layout then assert(layout_v == val, what .. ': its record layout is not the one this mod knows (game update?)') end end\n", 'layout check')
+    # (1.0.1 review) where the core hides enemies still aboard a dropship from a soldier, his pings and structures do too
+    src = once(src, "              if (p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2 <= reach2 and dz >= -DROPSHIP.below and dz <= DROPSHIP.above then D = put(D, c.id); break end\n            end\n          end\n        end\n      end\n    end\n",
+        "              if (p[1] - q[1]) ^ 2 + (p[2] - q[2]) ^ 2 <= reach2 and dz >= -DROPSHIP.below and dz <= DROPSHIP.above then D = put(D, c.id); break end\n            end\n          end\n        end\n      end\n    end\n"
+        "    st.aboard = D ~= NONE and D or nil   -- (Smarter SEAF 1.0.1: read by ping and structure steering)\n", 'aboard')
     # (1.0.0 patch-proofing) the two game lists only this mod uses - the weapon in each soldier's hands (wielder) and the
     # ping marks (spotted) - are found like the engine's others: their place in the known build, or a search of the
     # game's code after an update (3 patterns each from the 2026-09-24 game.dll; the majority wins). Optional: without
@@ -85,8 +102,8 @@ def transform(src, version, tester, test_build, research):
     src = once(src, "    weapons = { { p = '488b3d????????458bda8b77388b6f40', disp_at = 3, size = 7 },",
         "    -- (Smarter SEAF) the weapon wielder list (464-byte rows at +0x60: the first word is the weapon in his hands) and the\n"
         "    -- spot list (24-byte rows at +0x40: the ping marks)\n"
-        "    wielder = { " + ', '.join("{ p = '%s', disp_at = 3, size = 7 }" % p for p in WIELDER_PATS) + " },\n"
-        "    spotted = { " + ', '.join("{ p = '%s', disp_at = 3, size = 7 }" % p for p in SPOTTED_PATS) + " },\n"
+        "    wielder = { " + ', '.join("{ p = '%s', disp_at = 3, size = 7%s }" % (p, ', layout = true' if i == 0 else '') for i, p in enumerate(WIELDER_PATS)) + " },\n"
+        "    spotted = { " + ', '.join("{ p = '%s', disp_at = 3, size = 7%s }" % (p, ', layout = true' if i == 0 else '') for i, p in enumerate(SPOTTED_PATS)) + " },\n"
         "    weapons = { { p = '488b3d????????458bda8b77388b6f40', disp_at = 3, size = 7 },", 'patterns')
     src = once(src, "behaviours = 53634880, perception = 53634376, registry = 53636280, clock = 53633864, weapons = 53636320, heatbar = 53636424 },\n  owner_index",
         "behaviours = 53634880, perception = 53634376, registry = 53636280, clock = 53633864, weapons = 53636320, heatbar = 53636424, wielder = %d, spotted = %d },\n  owner_index" % (0x3326420, 0x3326450), 'known')
@@ -200,7 +217,7 @@ def transform(src, version, tester, test_build, research):
         "    local pb = bodies\n"
         "    if s.def.trooper then\n"
         "      -- (Smarter SEAF) four times a second: the weapon in his hands, and for a specialist whether he still has his EAT\n"
-        "      if gun_known() then pcall(gun_track, s, t) end\n"
+        "      if A and A.g.weapons then pcall(gun_track, s, t) end   -- ((1.0.1 review) the spent-EAT check needs only the weapon list)\n"
         "      -- a specialist whose EAT is gone fights like a rifleman (and as a specialist again once he has one)\n"
         "      if s.def.eat ~= nil then\n"
         "        local want = (s.eat_gone and t - s.eat_gone > 1) and SPECIALIST_SPENT or SPECIALIST\n"
@@ -370,7 +387,7 @@ def package(src, zpath, name, guid, desc):
             for f in sorted(files):
                 p = os.path.join(root, f)
                 zi = zipfile.ZipInfo(os.path.relpath(p, stage).replace(os.sep, '/'), date_time=(2026, 1, 1, 0, 0, 0))
-                zi.compress_type, zi.external_attr = zipfile.ZIP_DEFLATED, 0o644 << 16
+                zi.compress_type, zi.external_attr, zi.create_system = zipfile.ZIP_DEFLATED, 0o644 << 16, 3   # ((1.0.1) the same bytes on any OS)
                 z.writestr(zi, open(p, 'rb').read())
     shutil.rmtree(stage, ignore_errors=True)
     print(zpath, name, hashlib.sha256(open(zpath, 'rb').read()).hexdigest()[:16])
@@ -389,6 +406,8 @@ def main():
         lua = os.path.join(outdir, 'smarter_seaf%s.lua' % ('' if n else ('_tester' if tester else '_release')))
         open(lua, 'w').write(src)
         # sanitize: nothing from the author's computer
+        # ((1.0.1 review) the author's own words come from SANITIZE_EXTRA; without it the build says the check was partial)
+        if not os.environ.get('SANITIZE_EXTRA'): print('note: SANITIZE_EXTRA not set: only the generic personal-data checks ran')
         for bad in ['Don', 'Users\\\\', 'C:\\\\', 'D:\\\\', 'SteamLibrary'] + os.environ.get('SANITIZE_EXTRA', '').split():
             assert bad not in src or bad == 'Don' and not re.search(r"\bDon\b(?!')", src), 'sanitize: ' + bad
         subprocess.check_call([lj, '-e', 'assert(loadfile(%r))' % lua])

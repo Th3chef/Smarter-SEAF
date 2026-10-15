@@ -25,6 +25,8 @@
   -- the AI steps where he is staggered or getting up (Test 4: his gun 89-100% off his aim in these)
   local STAGGER_STEP = { [11] = true, [13] = true, [17] = true, [18] = true, [19] = true }
   local function gun_known() return A ~= nil and A.g.wielder ~= nil and A.g.weapons ~= nil end
+  -- ((1.0.1 review) the AI step numbers below are from the known game build: after an update they may mean other steps)
+  local function steps_known() return A ~= nil and A.known == true end
   -- a weapon entity: its record in the weapon list (index, owner row, unit, kind, muzzle part)
   local function weapon_of(wid)
     local wm = ptr_of(read(A.g.weapons, 8), 0)
@@ -47,6 +49,7 @@
   end
   -- the weapon id in his hands (his wielder record's first word), the wielder list's map header read once a frame
   local function in_hand(s)
+    if not A.g.wielder then return nil end   -- ((1.0.1 review) the spent-EAT check below still runs: it needs only the weapon list)
     if GUN.frame ~= FRAME then
       GUN.frame = FRAME
       local m = ptr_of(read(A.g.wielder, 8), 0)
@@ -135,6 +138,25 @@
       local a, B = axes[known.axis], s.gun_B
       if not B then B = {}; s.gun_B = B end
       B[1], B[2], B[3] = a[1] * known.sign, a[2] * known.sign, a[3] * known.sign
+      -- ((1.0.1 review) a preset is checked against where he really aims (steadily on his target, not staggered): 60
+      -- samples, on average well along his aim (a wrong axis is about square to it). A wrong one is dropped and the
+      -- barrel learned instead (the EAT's was set from the other guns, never measured)
+      if known.preset and not known.checked and st.target ~= 0 and st.synced and st.aim and not STAGGER_STEP[st.node] then
+        local dx, dy, dz = st.aim[1] - M[1], st.aim[2] - M[2], st.aim[3] - M[3]
+        local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if l > 1 then
+          known.sum, known.n = (known.sum or 0) + (B[1] * dx + B[2] * dy + B[3] * dz) / l, (known.n or 0) + 1
+          if known.n >= 60 then
+            local mean = known.sum / known.n
+            if mean >= 0.7 then known.checked = true
+            else
+              GUN.axis[k] = nil
+              note(string.format('SEAF gun: the preset barrel of the %s does not match his aim (%.2f): learning it instead', g.name or EXT.hexr(k), mean))
+              return nil
+            end
+          end
+        end
+      end
       return B
     end
     if not (st.target ~= 0 and st.synced and st.aim) then return nil end
@@ -173,7 +195,7 @@
     if not gun_known() or (#bodies == 0 and not (posts and posts[1])) then return nil end
     -- (Test 6) with no target he isn't firing: only checked while staggered or getting up (before, every enemy was
     -- hidden from a soldier walking with his gun across his squad, so he couldn't pick one - 33,021 frames in Test 5)
-    if st.target == 0 and not STAGGER_STEP[st.node] then return nil end
+    if st.target == 0 and not (steps_known() and STAGGER_STEP[st.node]) then return nil end
     local M, axes, g = gun_pose(s)
     if not M then return nil end
     local B = barrel_of(g, M, axes, st, s)
@@ -269,7 +291,8 @@
   -- fresh again when the clock's low 32 bits come round (every ~71.6 minutes)
   local PING = { t = -1, pinged = {}, dead = {}, ndead = 0, odd = 0, okrows = 0, notes = 0, LAST = 20, NEAR = 50 }
   local TWO32 = 4294967296
-  local function ping_refresh(t)
+  local NOPE = {}
+  local function ping_refresh(t, me)
     if t < PING.t then return end
     PING.t = t + 0.25
     if PING.off or not A.g.spotted then return end
@@ -281,15 +304,18 @@
     if cap == 0 or cap > 65536 or bit.band(cap, cap - 1) ~= 0 then return end
     local now32 = clock_now() % TWO32
     local seen = {}
+    local near2 = PING.NEAR * PING.NEAR
     for _, s in pairs(sentries) do
-      for _, c in ipairs(s.last_cands or {}) do
+      -- ((1.0.1 review) only the soldiers a ping can move: within 50 m of you)
+      local b = s.st and s.st.base
+      for _, c in ipairs((b and me and (b[1] - me[1]) ^ 2 + (b[2] - me[2]) ^ 2 + (b[3] - me[3]) ^ 2 <= near2) and s.last_cands or NOPE) do
         local id = c.id
         if not seen[id] then
           seen[id] = true
           local idx = map_lookup(m + 0x20, id, 65536, h, true)
           local row = idx and idx < 65536 and read(rows + idx * 24, 24)
           local P0 = PING.pinged[id]
-          if row and row:byte(17) > 1 then
+          if row and row:byte(17) > 1 and not A.known then   -- ((1.0.1 review) after a game update only)
             PING.odd = PING.odd + 1
             if PING.odd >= 20 and PING.odd > PING.okrows then
               PING.off, PING.pinged = true, {}
@@ -340,7 +366,7 @@
     if PING.off or not A.g.spotted then return nil end
     local b = st.base
     if not (me and b and (b[1] - me[1]) ^ 2 + (b[2] - me[2]) ^ 2 + (b[3] - me[3]) ^ 2 <= PING.NEAR * PING.NEAR) then return nil end
-    ping_refresh(t)
+    ping_refresh(t, me)
     if not next(PING.pinged) then return nil end
     local kept = eat_kept(s)
     local best, bd
@@ -351,7 +377,8 @@
         and not EXT.cannot_hurt(s.def, c)
         -- (1.0.0 review) not one the other rules would hide from him anyway (a light enemy while he keeps his EAT for
         -- heavy armor, a structure SEAF can't damage): he would only stand idle 2 s before giving up
-        and not (c.kind and STRUCT_NEVER[c.kind]) and not (kept and not eat_ok(c)) then
+        and not (c.kind and STRUCT_NEVER[c.kind]) and not (kept and not eat_ok(c))
+        and not (st.aboard and st.aboard[c.id]) then   -- ((1.0.1 review) not one still aboard a dropship)
         if not bd or c.d2 < bd then best, bd = c, c.d2 end
       end
     end
@@ -451,7 +478,7 @@
         -- ((1.0.0 review) counted when it takes him off one, not every frame it is hidden)
         if s.never_on ~= st.target then s.never_on = st.target; bump(session.actions, 'trooper_structure_hidden') end
         if not req.kick then req.kick, req.quiet, req.reason = true, true, 'trooper_cannot_damage'; s.P.ignored = math.max(s.P.ignored or 0, 1) end
-      end
+      else s.never_on = nil end
     end
   end
   -- (Armor Intelligence) a specialist who still carries his EAT, with no heavy enemy in sight and nothing at his feet,
@@ -470,7 +497,8 @@
         if a and a.av >= EAT_HEAVY and not a.sentries_skip then s.struct = nil; return end   -- (a heavy enemy: that first)
         local st_kind = c.kind and STRUCT_EAT[c.kind]
         if not st_kind and not (c.kind and STRUCT_ALL[c.kind]) and c.d2 and c.d2 < STRUCT_SELF2 then s.struct = nil; return end   -- (one at his feet: that first)
-        if st_kind and c.pos and c.d2 and c.d2 < STRUCT_NEAR2 and not (s.struct_skip and s.struct_skip[c.id]) and not unsafe_now(s, st, c.id) then
+        if st_kind and c.pos and c.d2 and c.d2 < STRUCT_NEAR2 and not (s.struct_skip and s.struct_skip[c.id]) and not unsafe_now(s, st, c.id)
+          and not (st.aboard and st.aboard[c.id]) then
           if not bd or c.d2 < bd then best, bd = c, c.d2 end
         end
       end
