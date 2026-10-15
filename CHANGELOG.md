@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 1.0.1
 
 First release. A new brain for the SEAF soldiers run by your game:
 - **Friendly Fire Safety:** they hold fire while you, a teammate, your sentries, another SEAF soldier or a civilian is in their line of fire, including while staggered or getting up. The option picks who's protected (helldivers, other troopers, or both).
