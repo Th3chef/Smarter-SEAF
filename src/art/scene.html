@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}</style>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script></head>
+<body><script type="module">
+import * as THREE from 'three';
+import { soldier, load, clean } from './pose.js';
+const q=new URLSearchParams(location.search); const shot=q.get('shot')||'thumb', layer=q.get('layer')||'near', preview=q.get('preview');
+const W=+(q.get('w')||1254), H=+(q.get('h')||1254);
+const r=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true}); r.setPixelRatio(1); r.setSize(W,H); r.setClearColor(0x000000, preview?1:0); document.body.appendChild(r.domElement);
+const scene=new THREE.Scene(); if (preview) scene.background=new THREE.Color(0x3a3530);
+scene.fog=new THREE.Fog(0x5a3520, +(q.get('fn')||5.5), +(q.get('ff')||16));
+const TL=new THREE.TextureLoader();
+const tex=async f=>{const t=await TL.loadAsync(f); t.colorSpace=THREE.SRGBColorSpace; return t;};
+const mats={body:new THREE.MeshMatcapMaterial({matcap:await tex('matcap_body.png')}), gun:new THREE.MeshMatcapMaterial({matcap:await tex('matcap_gun.png')})};
+const near=new THREE.Group(), far=new THREE.Group(); scene.add(near, far);
+// the squad: rifleman in front, specialist with his EAT beside him, a second rifleman behind
+const A=await soldier(THREE,mats,{weapon:'rifle', mask:'leader_mask', twist:-0.35}); A.root.position.set(+(q.get('ax')||0.3),0,+(q.get('az')||0.4)); A.root.rotation.y=+(q.get('ya')||0.25); near.add(A.root);
+const B=await soldier(THREE,mats,{weapon:'eat', twist:-0.15, aimPitch:0.03}); B.root.position.set(+(q.get('bx')||-1.2),0,+(q.get('bz')||-0.9)); B.root.rotation.y=+(q.get('yb')||0.15); near.add(B.root);
+const C=await soldier(THREE,mats,{weapon:'rifle', mask:'medic_mask', twist:-0.3, aimPitch:-0.08}); C.root.position.set(+(q.get('ccx')||-2.6),0,+(q.get('ccz')||-2.6)); C.root.rotation.y=+(q.get('yc')||0.3); near.add(C.root);
+near.visible=true; far.visible=false;
+const only=q.get('only'); if (only) { A.root.visible=only.includes('A'); B.root.visible=only.includes('B'); C.root.visible=only.includes('C'); }
+const cams={
+  thumb:{fov:+(q.get('fov')||32), pos:[-3.2,+(q.get('cy')||0.55),5.0], at:[+(q.get('atx')||-0.1),1.2,-0.6]},
+  poster:{fov:+(q.get('fov')||36), pos:[+(q.get('px')||-2.6),+(q.get('cy')||0.25),+(q.get('pz')||4.4)], at:[+(q.get('atx')||0.0),+(q.get('aty')||1.55),-0.6]},
+  wide:{fov:+(q.get('fov')||33), pos:[-3.2,+(q.get('cy')||1.05),5.0], at:[+(q.get('atx')||-0.6),1.25,-0.6]},
+};
+const c=cams[shot]; if (q.get('cx')) c.pos[0]=+q.get('cx');
+const cam=new THREE.PerspectiveCamera(c.fov,W/H,0.05,300); cam.position.set(...c.pos); cam.lookAt(...c.at);
+scene.updateMatrixWorld(true); r.render(scene,cam);
+const proj=v=>{const p=v.clone().project(cam); return [ (p.x+1)/2*W, (1-p.y)/2*H ];};
+const wp=o=>o.getWorldPosition(new THREE.Vector3());
+window.INFO={eat:proj(wp(B.WB.muzzle)), rifleA:proj(wp(A.WB.attach_muzzle)), rifleC:proj(wp(C.WB.attach_muzzle)), headA:proj(wp(A.B.head)), headB:proj(wp(B.B.head)), headC:proj(wp(C.B.head)), feetA:proj(wp(A.B.l_toe))};
+window.DONE=true;
+</script></body></html>
