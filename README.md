@@ -14,7 +14,7 @@ Smarter SEAF gives the SEAF soldiers a new brain. They stop shooting through you
   - Nobody wastes ammo on a Detector Tower they can't damage.
 - **Ping Targeting:** soldiers within 50 m of you go for the enemy you ping, for up to 20 seconds, if they can see it and hurt it. Soldiers farther away keep fighting their own fight.
 - **No shooting the dead or the unseen:** a soldier moves on the moment his target dies or goes out of sight, instead of firing at the spot.
-- **Light on your PC:** the brain runs a fraction of a millisecond per frame.
+- **Light on your PC:** the brain runs about a tenth of a millisecond per frame on average, and a little more for a couple of seconds when a new squad drops in near you.
 
 ## Options (Arsenal / HD2 Mod Manager)
 
@@ -34,7 +34,7 @@ Get the latest zip from the [Releases](../../releases/latest) page (the `Smarter
 ## Install / update
 
 1. Install Bingus Shared Loader v19 or newer.
-2. Add Smarter-SEAF-1.0.2.zip in Arsenal or the HD2 Mod Manager and check the options you want.
+2. Add Smarter-SEAF-1.0.3.zip in Arsenal or the HD2 Mod Manager and check the options you want.
 3. Purge, then Deploy (always both, every time you install or update), then restart the game.
 
 ## Uninstall
