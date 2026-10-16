@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from hd2_patch import resource_hash, lua_resource, write_lua_archive
 
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 MODULE = 'mods/chef/smarter_seaf'
 GUID_LIVE = 'f7c3abbe-902c-41a7-8183-057a6ab15768'
 GUID_TEST = '3c821d48-50e2-40c2-85e4-2a4c6f42b870'
@@ -303,6 +303,242 @@ def transform(src, version, tester, test_build, research):
     src = src[:i] + body + src[j:]
     src = once(src, "  TEAM.seaf_bodies = seaf_bodies",
         "  SGD.seaf_state = function() return SEAF.troops, sentries end   -- (Smarter SEAF research: the soldiers listed, the ones steered)\n  TEAM.seaf_bodies = seaf_bodies", 'expose')
+    # (1.0.3, performance) map lookups from a per-frame snapshot: a component map looked up 3+ times in one frame is
+    # read whole, once, into its own buffer (one system call instead of one per lookup and probe); its header is read
+    # once a frame. Reset each frame and after the game's update (sentry_after). Tester: reads per frame in the log
+    # ((Test 4) declared before the log writer: Test 3 declared it after, so the log's cost section hit a nil global and
+    # the log was never rewritten once the frame timing had started)
+    src = once(src, "local function write_log_to(f)\n",
+        "local RDN = { n = 0, b = 0, snaps = 0, snapb = 0 }   -- ((1.0.3) Tester: memory reads made, and map snapshots)\n"
+        "local function write_log_to(f)\n",
+        'read counter')
+    src = once(src, "    if K32.SgdReadProcessMemory(PROCESS, ffi.cast(PVOID, addr), buf, n, DONE) == 0 or DONE[0] ~= n then return nil end\n",
+        "    if TESTER then RDN.n, RDN.b = RDN.n + 1, RDN.b + n end   -- ((1.0.3) Tester log only)\n"
+        "    if K32.SgdReadProcessMemory(PROCESS, ffi.cast(PVOID, addr), buf, n, DONE) == 0 or DONE[0] ~= n then return nil end\n",
+        'read count')
+    src = once(src, "local function map_lookup(addr, key, max_capacity, header, soft)\n  local h = header or rd(addr, 20, 'map header')\n",
+        "-- ((1.0.3) a component map looked up 3 or more times in one frame - one lookup per soldier and enemy - is read whole\n"
+        "-- into its own buffer once that frame and probed there: one system call (~2-3 us each) instead of two or more per\n"
+        "-- lookup. Snapshots are dropped every frame and after the game's update; at most 64 maps, capacity up to 16384)\n"
+        "local MAPS = { gen = 0, n = 0, PU32 = ffi.typeof('const uint32_t *') }\n"
+        "local function map_snapshot(addr, slots, cap)\n"
+        "  local S = MAPS[addr]\n"
+        "  if not S then\n"
+        "    if MAPS.n >= 64 then return nil end\n"
+        "    S = { gen = -1, ugen = -1, uses = 0 }; MAPS[addr] = S; MAPS.n = MAPS.n + 1\n"
+        "  end\n"
+        "  if S.gen == MAPS.gen and S.slots == slots and S.cap == cap then return S.p end\n"
+        "  if S.ugen ~= MAPS.gen then S.ugen, S.uses = MAPS.gen, 0 end\n"
+        "  S.uses = S.uses + 1\n"
+        "  if S.uses < 3 or cap > 16384 then return nil end\n"
+        "  local size = cap * 8\n"
+        "  if not S.buf or S.size < size then S.buf, S.size = ffi.new('uint8_t[?]', size), size end\n"
+        "  if TESTER then RDN.snaps, RDN.snapb = RDN.snaps + 1, RDN.snapb + size end\n"
+        "  if K32.SgdReadProcessMemory(PROCESS, ffi.cast('const void *', slots), S.buf, size, DONE) == 0 or DONE[0] ~= size then S.gen = -1; return nil end\n"
+        "  S.gen, S.slots, S.cap, S.p = MAPS.gen, slots, cap, ffi.cast(MAPS.PU32, S.buf)\n"
+        "  return S.p\n"
+        "end\n"
+        "local function map_lookup(addr, key, max_capacity, header, soft)\n"
+        "  local h = header\n"
+        "  if not h then\n"
+        "    local S = MAPS[addr]\n"
+        "    if S and S.hgen == MAPS.gen then h = S.h\n"
+        "    else\n"
+        "      h = rd(addr, 20, 'map header')\n"
+        "      if S then S.h, S.hgen = h, MAPS.gen end\n"
+        "    end\n"
+        "  end\n",
+        'map snapshot')
+    src = once(src, "  local hash = (key * mlo + (key * ((mult - mlo) / 65536) % 65536) * 65536) % 4294967296\n  for i = 0, math.min(cap, 128) - 1 do\n",
+        "  local hash = (key * mlo + (key * ((mult - mlo) / 65536) % 65536) * 65536) % 4294967296\n"
+        "  local P = map_snapshot(addr, slots, cap)\n"
+        "  if P then\n"
+        "    for i = 0, math.min(cap, 128) - 1 do\n"
+        "      local j = bit.band(hash + i, cap - 1)\n"
+        "      local k = tonumber(P[2 * j])\n"
+        "      if k == key then\n"
+        "        local v = tonumber(P[2 * j + 1])\n"
+        "        return v ~= 4294967295 and v or nil\n"
+        "      end\n"
+        "      if k == empty then return nil end\n"
+        "    end\n"
+        "    if soft then return nil end\n"
+        "    error({ Abort, 'map probe' }, 0)\n"
+        "  end\n"
+        "  for i = 0, math.min(cap, 128) - 1 do\n",
+        'map probe from snapshot')
+    src = once(src, "  FRAME = FRAME + 1\n", "  FRAME = FRAME + 1\n  MAPS.gen = MAPS.gen + 1   -- ((1.0.3) map snapshots are per frame)\n", 'snapshot frame')
+    src = once(src, "    RC.frame = -1   -- (the game's update may have moved its lists)\n",
+        "    RC.frame = -1   -- (the game's update may have moved its lists)\n    MAPS.gen = MAPS.gen + 1   -- ((1.0.3) and its maps: snapshots taken before it are stale)\n", 'snapshot after update')
+    src = once(src, "    f:write(string.format('mod cost per frame (test): average %.3f ms, highest %.2f ms, over 1 ms in %d of %d frames\\n', T.sum / T.n, T.max, T.over, T.n))\n",
+        "    f:write(string.format('mod cost per frame (test): average %.3f ms, highest %.2f ms, over 1 ms in %d of %d frames\\n', T.sum / T.n, T.max, T.over, T.n))\n"
+        "    f:write(string.format('memory reads (test, since start): %.1f a frame (%.0f bytes); map snapshots %d (%.1f a frame, %.0f KB in all)\\n', RDN.n / T.n, RDN.b / T.n, RDN.snaps, RDN.snaps / T.n, RDN.snapb / 1024))\n"
+        "    f:write(string.format('relaxed pacing (test): %d soldier checks; %d with no target (checked 20 a second), %d with a target and nobody near him or his line (checked 30 a second)\\n', RDN.checked or 0, RDN.idle or 0, RDN.relaxed or 0))\n",
+        'reads line')
+    src = once(src, "    laser.step = part('laser', laser.step)\n",
+        "    laser.step = part('laser', laser.step)\n    if SGD.probe_step then SGD.probe_step = part('research (test builds)', SGD.probe_step) end\n", 'research part')
+    # (1.0.3, performance) positions read once a frame: a unit's place is looked up again and again in one frame (each
+    # soldier as a body for the others, as a shooter, his gun); the first lookup reads it, the rest get a copy
+    src = once(src, "function unit_position(id, want_axes)\n  if not id or id == 0 then return nil end\n  local ok, pos = pcall(unit_position_raw, id, want_axes)\n  return ok and pos or nil\nend",
+        "local UPM = { frame = -1, t = {} }   -- ((1.0.3) this frame's unit places)\n"
+        "MAPS.upm = UPM   -- ((Test 4) reset after the game's update through MAPS: UPM is local to this block)\n"
+        "function unit_position(id, want_axes)\n  if not id or id == 0 then return nil end\n"
+        "  if not want_axes then\n"
+        "    if UPM.frame ~= FRAME then UPM.frame, UPM.t = FRAME, {} end\n"
+        "    local c = UPM.t[id]\n"
+        "    if c then return { c[1], c[2], c[3], pose = c.pose } elseif c == false then return nil end\n"
+        "  end\n"
+        "  local ok, pos = pcall(unit_position_raw, id, want_axes)\n"
+        "  if not want_axes and UPM.frame == FRAME then UPM.t[id] = ok and pos and { pos[1], pos[2], pos[3], pose = pos.pose } or false end\n"
+        "  return ok and pos or nil\nend",
+        'unit position per frame')
+    # (1.0.3) the registry's map header and list once a frame, not once per soldier
+    src = once(src, "  local reg_head = rd(registry + 73808, 20, 'registry map')\n  local reg_list = ptr_of(read(registry + 73832, 8), 0)\n",
+        "  if RDN.rh_frame ~= FRAME or RDN.rh_reg ~= registry then\n"
+        "    RDN.rh_head = rd(registry + 73808, 20, 'registry map')   -- ((1.0.3) once a frame, not once per soldier)\n"
+        "    RDN.rh_list, RDN.rh_frame, RDN.rh_reg = ptr_of(read(registry + 73832, 8), 0), FRAME, registry\n"
+        "  end\n"
+        "  local reg_head, reg_list = RDN.rh_head, RDN.rh_list\n",
+        'registry header per frame')
+    src = once(src, "    MAPS.gen = MAPS.gen + 1   -- ((1.0.3) and its maps: snapshots taken before it are stale)\n",
+        "    MAPS.gen = MAPS.gen + 1   -- ((1.0.3) and its maps: snapshots taken before it are stale)\n"
+        "    RDN.rh_frame, MAPS.upm.frame = -1, -1   -- ((1.0.3) and the registry header and this frame's places)\n", 'after-update resets')
+    # (1.0.3, Test 5) a busy soldier is checked every other frame (30 a second) unless a helldiver or one of your
+    # sentries is within 25 m of him or within 15 m of his line of fire (from him to where he aims, or to his target):
+    # those - everyone your safety depends on - are still checked every frame. Only a line toward another SEAF soldier,
+    # with no helldiver near, can be seen up to one frame later
+    src = once(src, "      if s.moved or s.busy ~= false or not s.st or t >= (s.next_read or 0) then",
+        "      -- ((1.0.3 Test 6) a soldier with no target is checked every third frame (at least 15 a second): the game has to give\n"
+        "      -- him a target and he has to turn to it before he fires, and from that frame on he is checked every frame again)\n"
+        "      local lag = t - (s.read_t or -1) + (dt or 0)\n"
+        "      local skip = (s.idle and (FRAME + s.id) % 3 ~= 0 and lag < 0.07) or (not s.idle and s.far and (FRAME + s.id) % 2 == 1 and lag < 0.045)\n"
+        "      -- (and a skipped soldier's AI step and target are still read every frame - one small read: a new step (staggered, say)\n"
+        "      -- or a new target and he is checked in full straight away)\n"
+        "      if skip and s.st and s.busy ~= false then\n"
+        "        local r = read(s.rec_addr, 28)\n"
+        "        if not r or u32(r, 8) ~= s.st.node or u32(r, 24) ~= (s.st.friend_target or s.st.target) then skip = false end\n"
+        "        -- (with a target: his barrel's line as it is now, near a friend - swung by a stagger, say - and he is checked in full)\n"
+        "        local W = SGD.seaf_gun and SGD.seaf_gun.watch\n"
+        "        if skip and not s.idle and W then\n"
+        "          local okw, w = pcall(W, s, s.st, bodies, pbodies)\n"
+        "          if not okw or w then skip = false end\n"
+        "        end\n"
+        "      end\n"
+        "      if s.moved or not s.st or t >= (s.next_read or 0) or (s.busy ~= false and not skip) then", 'far pacing')
+    src = once(src, "          st.me, st.posts = me, pbodies\n",
+        "          st.me, st.posts = me, pbodies\n"
+        "          -- ((1.0.3 Test 6) relaxed pacing: no helldiver, sentry of yours or other SEAF soldier near him (8 m; a soldier 2 m) or\n"
+        "          -- within 25 degrees of his line of fire - he would have to turn that far, which takes longer than a frame, to\n"
+        "          -- put his fire on them; Test 5's rule also stays: a helldiver or sentry 25 m away and 15 m off his line is clear)\n"
+        "          local far = st.base ~= nil and me ~= nil and not ((s.gun_hold or 0) > t)\n"
+        "          if far then\n"
+        "            local b0, tp = st.base, st.aim\n"
+        "            if not tp and st.target ~= 0 then\n"
+        "              for _, c in ipairs(st.candidates) do if c.id == st.target then tp = c.pos; break end end\n"
+        "            end\n"
+        "            local lx, ly = tp and tp[1] - b0[1] or 0, tp and tp[2] - b0[2] or 0\n"
+        "            local ll = lx * lx + ly * ly\n"
+        "            local bx, by = b0[1], b0[2]\n"
+        "            if seaf_near(me[1], me[2], bx, by, lx, ly, ll, 8) then far = false end\n"
+        "            if far then\n"
+        "              for _, b in ipairs(people) do local a = b.at; if a and seaf_near(a[1], a[2], bx, by, lx, ly, ll, 8) then far = false; break end end\n"
+        "            end\n"
+        "            if far and pbodies then\n"
+        "              for _, b in ipairs(pbodies) do local a = b.at; if a and seaf_near(a[1], a[2], bx, by, lx, ly, ll, 8) then far = false; break end end\n"
+        "            end\n"
+        "            if far and fb then\n"
+        "              for _, b in ipairs(fb) do local a = b.at; if a and b.sid ~= s.id and seaf_near(a[1], a[2], bx, by, lx, ly, ll, 2) then far = false; break end end\n"
+        "            end\n"
+        "          end\n"
+        "          s.far = far or nil\n"
+        "          if TESTER then RDN.relaxed, RDN.checked = (RDN.relaxed or 0) + (far and st.target ~= 0 and 1 or 0), (RDN.checked or 0) + 1 end\n",
+        'far flag')
+    src = once(src, "          s.busy = b\n",
+        "          s.busy = b\n"
+        "          -- ((1.0.3 Test 6) no target, not in his firing step, not staggered or getting up, no hold on his fire: checked every third frame)\n"
+        "          s.idle = (s.def.trooper and st.target == 0 and st.node ~= (s.def.fire_node or FIRE_NODE) and not s.staggered and not ((s.gun_hold or 0) > t)) or nil\n"
+        "          if TESTER and s.idle then RDN.idle = (RDN.idle or 0) + 1 end\n",
+        'idle flag')
+    # ((1.0.3 review) the relaxed-pacing test as one plain function, defined once: Tests 5-6 made a small function inside
+    # the per-soldier loop every check, and LuaJIT can't compile a loop that does (NYI: FNEW))
+    src = once(src, "  sentry_tick = function(st_dog, t, dt)\n",
+        "  -- ((1.0.3) relaxed pacing) is (px, py) near him (rc m) or within 25 degrees of his line (lx, ly; ll its length squared)?\n"
+        "  -- (with no line: within 25 m. A point 25 m away and 15 m off his line is clear, Test 5's rule)\n"
+        "  local function seaf_near(px, py, bx, by, lx, ly, ll, rc)\n"
+        "    local dx, dy = px - bx, py - by\n"
+        "    local d2 = dx * dx + dy * dy\n"
+        "    if d2 < rc * rc then return true end\n"
+        "    if ll <= 1e-6 then return d2 < 625 end\n"
+        "    local w = dx * lx + dy * ly\n"
+        "    if w > 0 and w * w > 0.821 * d2 * ll then   -- (cos^2 25 degrees = 0.821)\n"
+        "      if d2 >= 625 then\n"
+        "        local u = w / ll\n"
+        "        u = u > 1 and 1 or u\n"
+        "        local ex, ey = dx - u * lx, dy - u * ly\n"
+        "        if ex * ex + ey * ey >= 225 then return false end\n"
+        "      end\n"
+        "      return true\n"
+        "    end\n"
+        "    return false\n"
+        "  end\n"
+        "  sentry_tick = function(st_dog, t, dt)\n",
+        'relaxed pacing helper')
+    # (1.0.3, performance) the line-of-fire check first measures a cheap lower bound - the body's middle from the line to
+    # the middle of where his shots land, less half the body and half that spread - and skips the two exact segment
+    # distances when the body is clearly off the line (over 1 m clear: the 0.3 m 'linger' rule and every reason only
+    # look at gaps under that). Every other check (the target's aim line, sweeps, splash) is unchanged
+    src = once(src, "              local m = math.min(segment_distance(M, AIM_LO, b.lo, b.hi), segment_distance(M, AIM_HI, b.lo, b.hi))\n",
+        "              local m\n"
+        "              do   -- ((1.0.3) a cheap lower bound first: the body's middle against the line to the middle of the aim heights)\n"
+        "                local lo, hi = b.lo, b.hi\n"
+        "                local am, ah = (AIM_UP[1] + AIM_UP[2]) * 0.5, math.abs(AIM_UP[2] - AIM_UP[1]) * 0.5\n"
+        "                local vx, vy, vz = p[1] - M[1], p[2] - M[2], p[3] + am - M[3]\n"
+        "                local wx, wy, wz = (lo[1] + hi[1]) * 0.5 - M[1], (lo[2] + hi[2]) * 0.5 - M[2], (lo[3] + hi[3]) * 0.5 - M[3]\n"
+        "                local vv = vx * vx + vy * vy + vz * vz\n"
+        "                local tt = vv > 1e-9 and (wx * vx + wy * vy + wz * vz) / vv or 0\n"
+        "                tt = tt < 0 and 0 or (tt > 1 and 1 or tt)\n"
+        "                local ex, ey, ez = wx - tt * vx, wy - tt * vy, wz - tt * vz\n"
+        "                local bound = math.sqrt(ex * ex + ey * ey + ez * ez) - 0.5 * math.sqrt((hi[1] - lo[1]) ^ 2 + (hi[2] - lo[2]) ^ 2 + (hi[3] - lo[3]) ^ 2) - ah - 0.01\n"
+        "                if bound - r > 1.0 then m = bound end\n"
+        "              end\n"
+        "              m = m or math.min(segment_distance(M, AIM_LO, b.lo, b.hi), segment_distance(M, AIM_HI, b.lo, b.hi))\n",
+        'line bound')
+    # (1.0.3, Tester) where the steering's time goes, per phase: reading the soldiers, deciding (safety, armor, pings,
+    # guns), the bodies list; in ms a frame on average, written under the mod cost
+    src = once(src, "    local q2 = ffi.new('int64_t[1]')\n",
+        "    local q2 = ffi.new('int64_t[1]')\n"
+        "    local q3 = ffi.new('int64_t[1]')\n"
+        "    T.phases, T.porder = {}, {}\n"
+        "    SGD.now_ms = function() K32.SgdQueryPerformanceCounter(q3); return tonumber(q3[0]) / per_ms end\n"
+        "    SGD.phase = function(name, ms)\n"
+        "      local P = T.phases[name]\n"
+        "      if not P then P = { n = 0, sum = 0, max = 0 }; T.phases[name] = P; T.porder[#T.porder + 1] = name end\n"
+        "      P.n, P.sum = P.n + 1, P.sum + ms\n"
+        "      if ms > P.max then P.max = ms end\n"
+        "    end\n",
+        'phase timer')
+    src = once(src, "        if s.moved then ok, st, why = true, nil, nil else ok, st, why = pcall(read_sentry, s, registry) end\n",
+        "        local q0 = TESTER and SGD.now_ms and SGD.now_ms()\n"
+        "        if s.moved then ok, st, why = true, nil, nil else ok, st, why = pcall(read_sentry, s, registry) end\n"
+        "        if q0 then SGD.phase('reading a soldier', SGD.now_ms() - q0) end\n",
+        'phase read')
+    src = once(src, "          local okp, perr = pcall(sentry_step, s, st, bodies, t, people, me)\n",
+        "          local q1 = TESTER and SGD.now_ms and SGD.now_ms()\n"
+        "          local okp, perr = pcall(sentry_step, s, st, bodies, t, people, me)\n"
+        "          if q1 then SGD.phase('deciding for a soldier', SGD.now_ms() - q1) end\n",
+        'phase decide')
+    src = once(src, "    local fb = seaf_bodies(t, me)\n",
+        "    local qb = TESTER and SGD.now_ms and SGD.now_ms()\n"
+        "    local fb = seaf_bodies(t, me)\n"
+        "    if qb then SGD.phase('the soldiers as bodies', SGD.now_ms() - qb) end\n",
+        'phase bodies')
+    src = once(src, "    for _, Pt in ipairs(T.parts or {}) do\n",
+        "    for _, name in ipairs(T.porder or {}) do\n"
+        "      local P = T.phases[name]\n"
+        "      f:write(string.format('  - %-26s %d times, %.3f ms a frame on average, %.3f ms each, highest %.2f ms\\n', name, P.n, P.sum / T.n, P.sum / P.n, P.max))\n"
+        "    end\n"
+        "    for _, Pt in ipairs(T.parts or {}) do\n",
+        'phase report')
     # the research module instead of SGD's ping probe
     i = src.index('-- (4.6.6 Test 2+, research only')
     i = src.rindex('-- ====', 0, i)
