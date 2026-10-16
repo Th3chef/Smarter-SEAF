@@ -189,6 +189,8 @@
   -- ((1.0.0 review) your sentries too, with Friendly Fire Safety for helldivers: st.posts, nil with it off)
   local function gun_on_friend(s, st, bodies, t)
     local posts = st.posts
+    -- ((1.0.3 Test 6) staggered or getting up: he stays checked every frame, target or not)
+    s.staggered = (steps_known() and STAGGER_STEP[st.node]) or nil
     if not gun_known() or (#bodies == 0 and not (posts and posts[1])) then return nil end
     -- (Test 6) with no target he isn't firing: only checked while staggered or getting up (before, every enemy was
     -- hidden from a soldier walking with his gun across his squad, so he couldn't pick one - 33,021 frames in Test 5)
@@ -229,6 +231,31 @@
       if not posts then break end
     end
     return nil
+  end
+  -- ((1.0.3 Test 6) on a frame a soldier with a target is not checked in full (relaxed pacing): is his barrel's line, as it
+  -- is now, anywhere near a friend (1 m more margin than the full check)? Then he is checked in full this frame. Learns
+  -- nothing; no gun found, a barrel not known yet or a gun that can't be read counts as near)
+  GUN.watch = function(s, st, bodies, posts)
+    if not gun_known() or not s.gun then return true end
+    local M, axes, g = gun_pose(s)
+    if not M then return true end
+    local known = GUN.axis[g.kind]
+    if not known then return true end
+    local a = axes[known.axis]
+    local bx, by, bz = a[1] * known.sign, a[2] * known.sign, a[3] * known.sign
+    local far = s.gun_wfar
+    if not far then far = {}; s.gun_wfar = far end
+    far[1], far[2], far[3] = M[1] + bx * GUN_REACH, M[2] + by * GUN_REACH, M[3] + bz * GUN_REACH
+    for k = 1, 2 do
+      for _, b in ipairs(k == 1 and bodies or posts or NONE) do
+        if b.sid ~= s.id or k == 2 then
+          local p = b.at
+          local along = (p[1] - M[1]) * bx + (p[2] - M[2]) * by + (p[3] + 1 - M[3]) * bz
+          if along > -1 and along < GUN_REACH + 2 and segment_distance(M, far, b.lo, b.hi) < GUN_MARGIN + 1 + (b.extra or 0) then return true end
+        end
+      end
+    end
+    return false
   end
   SGD.seaf_gun = GUN
   -- ======================================================================================================
