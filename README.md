@@ -10,7 +10,7 @@ Smarter SEAF gives the SEAF soldiers a new brain. They stop shooting through you
 - **Friendly Fire Safety:** a SEAF soldier holds fire while you, a teammate, one of your sentries, another SEAF soldier or a civilian is in his line of fire, and picks another enemy instead. He also holds fire while his gun is pointed at a friend when he's staggered or getting up, so he doesn't spray bullets across his squad. The option chooses who is protected: *Helldivers and other troopers*, *Only helldivers* or *Only other troopers*.
 - **Armor Intelligence:**
   - Soldiers know what their guns can hurt. Armor they can't get through is left for later while there's something else to shoot. With nothing else around, they shoot it anyway (ammo is no concern for their guns).
-  - Specialists keep their one EAT for Chargers and heavier, and for structures it can destroy (fabricators, bug holes, Shrieker Nests, Spore Spewers, Gazers, Lightning Spires, Warp Gateways). A specialist who draws his EAT with nothing heavy around puts it away again after a few seconds.
+  - Specialists save their one EAT for heavy enemies (Chargers, Behemoths, Bile Titans, Impalers, Hulks, tanks, Factory and War Striders, Harvesters, Dragonroaches, Vox Engines and emplacements) and for structures it can destroy (fabricators, bug holes, Shrieker Nests, Spore Spewers, Gazers, Lightning Spires, Warp Gateways). They never fire it at Stalkers, Alpha Commanders, Devastators, Scout Striders, Leviathans or Hive Lords. A specialist who draws his EAT with nothing heavy around holds his fire until the game has him put it away.
   - Nobody wastes ammo on a Detector Tower they can't damage.
 - **Ping Targeting:** soldiers within 50 m of you go for the enemy you ping, for up to 20 seconds, if they can see it and hurt it. Soldiers farther away keep fighting their own fight.
 - **No shooting the dead or the unseen:** a soldier moves on the moment his target dies or goes out of sight, instead of firing at the spot.
@@ -34,7 +34,7 @@ Get the latest zip from the [Releases](../../releases/latest) page (the `Smarter
 ## Install / update
 
 1. Install Bingus Shared Loader v19 or newer.
-2. Add Smarter-SEAF-1.0.3.zip in Arsenal or the HD2 Mod Manager and check the options you want.
+2. Add Smarter-SEAF-1.0.4.zip in Arsenal or the HD2 Mod Manager and check the options you want.
 3. Purge, then Deploy (always both, every time you install or update), then restart the game.
 
 ## Uninstall

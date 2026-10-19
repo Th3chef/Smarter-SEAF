@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4
+
+- **EATs only on heavy enemies:** specialists now only fire their one EAT at Chargers, Behemoths, Bile Titans, Impalers, Hulks, tanks, Factory and War Striders, Harvesters, Dragonroaches, Vox Engines, emplacements, and the structures it can destroy. Never at Stalkers, Alpha Commanders, Devastators, Scout Striders, Leviathans or Hive Lords. Before, a specialist could fire it at anything 4 seconds after the last heavy enemy he saw, or before the mod noticed he had drawn it. With nothing heavy around, a specialist who draws his EAT now holds his fire until the game has him put it away.
+- **Lighter log writing:** the log file stays open instead of being reopened every time it's updated (about 2 ms saved each time).
+
 ## 1.0.3
 
 - **Faster:** the mod does much less work for each soldier. What it reads from the game is read once a frame and shared, and soldiers who can't endanger anyone are checked a little less often: one with no target 20 times a second, one firing away from everyone 30 times a second. A soldier is still checked every frame the moment anyone is near his line of fire, his gun swings toward someone, he's staggered or he picks a new target. In testing it used about half the time overall, and the spike when a new squad drops in near you went from over 100 to about 60 ms a second.
