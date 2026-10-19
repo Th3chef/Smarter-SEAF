@@ -69,7 +69,13 @@
   -- (1.0.0 review) four times a second: the weapon in his hands and, for a specialist, whether he still carries an EAT.
   -- Runs for every soldier whatever the options, apart from the pose read below (only needed for the gun check)
   local function gun_track(s, t)
-    if t < (s.gun_next or 0) then return end
+    if t < (s.gun_next or 0) then
+      -- ((1.0.4) a specialist who still has his EAT, with Armor Intelligence on: what's in his hands is read every time
+      -- he is checked (one small read): in game he can draw his EAT and fire it within a third of a second, faster than
+      -- four times a second can see it)
+      if s.def.eat ~= true or rawget(_G, 'SmarterSEAFArmor') ~= true then return end
+      if in_hand(s) == s.gun_wid then return end
+    end
     s.gun_next = t + 0.25
     local wid = in_hand(s)
     -- ((1.0.0 review) looked up again while it isn't found: the game may list his weapon a moment after he switches)
@@ -108,6 +114,14 @@
       end
       if has then s.eat_seen, s.eat_gone = true, nil
       elseif s.eat_seen and not s.eat_gone then s.eat_gone = t end
+      -- ((1.0.4 review) Testers: 1.5 s after the EAT left his hands, was it fired (gone) or put away (still on him)?
+      local L = s.eat_left
+      if L and t - L.t > 1.5 then
+        local E = GUN.eatlog
+        if s.eat_gone then E.fired = E.fired + 1; if not L.heavy then E.fired_idle = E.fired_idle + 1 end
+        else E.put_away = E.put_away + 1; if not L.heavy then E.put_away_idle = E.put_away_idle + 1 end end
+        s.eat_left = nil
+      end
     end
   end
   -- his gun this frame: muzzle place and the axes of the muzzle part (nil when nothing usable is in his hands); the
@@ -257,6 +271,8 @@
     end
     return false
   end
+  -- ((1.0.4) for the relaxed pacing's watch on skipped frames: the weapon id in his hands)
+  GUN.hand = function(s) return in_hand(s) end
   SGD.seaf_gun = GUN
   -- ======================================================================================================
   -- (1.0.0) the options: each a tiny addon setting a flag, read every frame (Friendly Fire Safety sets the engine's own safety
@@ -289,14 +305,22 @@
   SEAF.struct_types = TESTER and STRUCT_ALL or nil   -- (1.0.0 review: the targeting-list scan keeps them for the Tester's log only)
   SEAF.structs = SEAF.structs or {}
   -- what a specialist may fire his EAT at: armor 4 and up (Chargers and heavier), or a structure it can destroy
+  -- ((1.0.4 review, the author) armor 4 and up, but never: Devastators (Heavy, shield, Conflagration: their shields and
+  -- plates are heavy, the rest of them isn't), Scout Striders (front plate, cabin, gun), and Leviathans and Hive Lords
+  -- (far too much health for one EAT)
+  -- (marked on their armor entries once, at load: 'seaf_no_eat'; specialists don't put them first either, armour_tier)
+  local EAT_NEVER = { 'Devastator', 'Scout Strider', 'Leviathan', 'Hive Lord' }
+  for _, a in pairs(ARMOR) do
+    for _, w in ipairs(EAT_NEVER) do if a.name and a.name:find(w, 1, true) then a.seaf_no_eat = true; break end end
+  end
   local function eat_ok(c)
     local a = c.kind and ARMOR[c.kind]
-    if a then return a.av >= EAT_HEAVY and not a.sentries_skip end
+    if a then return a.av >= EAT_HEAVY and not a.sentries_skip and not a.seaf_no_eat end
     return c.kind ~= nil and STRUCT_EAT[c.kind] ~= nil
   end
   -- is the EAT in his hands, and still kept for heavy armor (not let go yet)?
   local function eat_kept(s)
-    return s.def.eat == true and s.gun ~= nil and s.gun.kind == EAT_TYPE and not (s.eat_hold and s.eat_hold.free) and opt_armor()
+    return s.def.eat == true and s.gun ~= nil and s.gun.kind == EAT_TYPE and opt_armor()
   end
   -- an enemy that a friend was in front of a moment ago (the engine's 0.3 s linger after an unsafe shot), or that is
   -- unsafe right now: never one he is pushed onto
@@ -446,13 +470,23 @@
   end
   -- (Armor Intelligence) a specialist keeps his EAT for heavy armor (armor 4 and up: Chargers and heavier) and the
   -- structures it can destroy. While the EAT is in his hands, every lighter enemy is hidden from him so he can't fire
-  -- it at them (Test 5: all three EATs went into a Predator Stalker a minute before a Charger came). Only a heavy one he
-  -- can see, alive, within 100 m counts; 4 s after the last one he is let go so he isn't left standing with it out
-  -- (1.0.0 review: a dead or far-off Charger kept him holding it, 15 s in a sim).
+  -- it at them (Test 5: all three EATs went into a Predator Stalker a minute before a Charger came).
+  -- ((1.0.4, the author: "SEAF specialists should ONLY use their EATs on heavy units ... they need to be saved for when they
+  -- are needed") he is never let go: 1.0.0-1.0.3 let him fire it at anything 4 s after the last heavy enemy he could
+  -- see. With nothing heavy about he holds it, firing at nothing, until the game has him put it away or a heavy one comes)
+  -- ((1.0.4 review) Testers: each draw - whether anything heavy (or a structure) was in sight while it was out, how long
+  -- it was out, and then (gun_track, 1.5 s on) whether he fired it or the game had him put it away)
+  GUN.eatlog = { draws = 0, idle = 0, idle_s = 0, idle_max = 0, fired = 0, fired_idle = 0, put_away = 0, put_away_idle = 0 }
   local function eat_hold(s, st, t)
+    s.eat_out = nil
     if s.def.eat ~= true or not opt_armor() then s.eat_hold = nil; return nil end
     local g = s.gun
     if not (g and g.kind == EAT_TYPE) then
+      if s.eat_hold and TESTER then
+        local H, E = s.eat_hold, GUN.eatlog
+        if not H.heavy then E.idle = E.idle + 1; E.idle_s = E.idle_s + (t - H.t0); E.idle_max = math.max(E.idle_max, t - H.t0) end
+        s.eat_left = { t = t, heavy = H.heavy }
+      end
       if s.eat_hold and TESTER and (GUN.eat_notes or 0) < 12 then
         GUN.eat_notes = (GUN.eat_notes or 0) + 1
         event(string.format('SEAF EAT: %s no longer has his EAT in his hands (fired it or put it away) after %.1f s', s.tag or s.def.name, t - s.eat_hold.t0))
@@ -461,26 +495,25 @@
       return nil
     end
     local H = s.eat_hold
-    if not H then H = { t0 = t, last = t }; s.eat_hold = H end
-    if H.free then return nil end
+    if not H then H = { t0 = t, last = t }; s.eat_hold = H; if TESTER then GUN.eatlog.draws = GUN.eatlog.draws + 1 end end
+    s.eat_out = true   -- ((1.0.4) checked in full every frame while it is out: the relaxed pacing never skips him)
     -- ((1.0.0 review) his own set, emptied and refilled: no new table every frame)
     local light = s.eat_light
     if light then for k in pairs(light) do light[k] = nil end else light = {}; s.eat_light = light end
     local any = false
     for _, c in ipairs(st.candidates) do
       if eat_ok(c) then
-        if c.alive and c.visible and c.d2 and c.d2 < EAT_REACH2 then H.last = t end
+        if c.alive and c.visible and c.d2 and c.d2 < EAT_REACH2 then H.last, H.heavy = t, true end
       else light[c.id] = true; any = true end
     end
     if not any then light = nil end
-    if t - H.last > EAT_WAIT then
-      H.free = true
-      bump(session.actions, 'trooper_eat_let_go')
-      if TESTER and (GUN.eat_notes or 0) < 12 then
+    -- (Testers: how long he stands with it out and nothing heavy in sight, once per draw)
+    if TESTER and not H.noted and t - H.last > EAT_WAIT then
+      H.noted = true
+      if (GUN.eat_notes or 0) < 12 then
         GUN.eat_notes = (GUN.eat_notes or 0) + 1
-        event(string.format('SEAF EAT: %s held his EAT %d s with nothing heavy (or a structure) in sight: let go', s.tag or s.def.name, EAT_WAIT))
+        event(string.format('SEAF EAT (test): %s has held his EAT %d s with nothing heavy (or a structure) in sight: kept for heavy armor', s.tag or s.def.name, EAT_WAIT))
       end
-      return nil
     end
     if light and not H.counted then H.counted = true; bump(session.actions, 'trooper_eat_kept') end   -- ((1.0.0 review) once per draw)
     return light
@@ -518,7 +551,7 @@
     for _, c in ipairs(st.candidates) do
       if c.alive and c.visible then
         local a = c.kind and ARMOR[c.kind]
-        if a and a.av >= EAT_HEAVY and not a.sentries_skip then s.struct = nil; return end   -- (a heavy enemy: that first)
+        if a and eat_ok(c) then s.struct = nil; return end   -- (a heavy enemy his EAT is for: that first ((1.0.4) not one on the never-list))
         local st_kind = c.kind and STRUCT_EAT[c.kind]
         if not st_kind and not (c.kind and STRUCT_ALL[c.kind]) and c.d2 and c.d2 < STRUCT_SELF2 then s.struct = nil; return end   -- (one at his feet: that first)
         if st_kind and c.pos and c.d2 and c.d2 < STRUCT_NEAR2 and not (s.struct_skip and s.struct_skip[c.id]) and not unsafe_now(s, st, c.id)

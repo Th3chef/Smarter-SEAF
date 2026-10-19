@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from hd2_patch import resource_hash, lua_resource, write_lua_archive
 
-VERSION = '1.0.3'
+VERSION = '1.0.4'
 MODULE = 'mods/chef/smarter_seaf'
 GUID_LIVE = 'f7c3abbe-902c-41a7-8183-057a6ab15768'
 GUID_TEST = '3c821d48-50e2-40c2-85e4-2a4c6f42b870'
@@ -303,6 +303,41 @@ def transform(src, version, tester, test_build, research):
     src = src[:i] + body + src[j:]
     src = once(src, "  TEAM.seaf_bodies = seaf_bodies",
         "  SGD.seaf_state = function() return SEAF.troops, sentries end   -- (Smarter SEAF research: the soldiers listed, the ones steered)\n  TEAM.seaf_bodies = seaf_bodies", 'expose')
+    # (1.0.4, the same change as SGD 5.1.5) the log file is opened once and kept open: each rewrite goes back to its
+    # start, writes and cuts it to the new length (opening and closing it was ~2.2 ms a rewrite); on any failure the
+    # handle is closed and the log goes back to opening and closing the file
+    src = once(src, "  'int SgdCloseHandle(void *handle) __asm__(\"CloseHandle\");',\n",
+        "  'int SgdCloseHandle(void *handle) __asm__(\"CloseHandle\");',\n"
+        "  'void *SgdCreateFileA(const char *path, uint32_t access, uint32_t share, void *security, uint32_t disposition, uint32_t flags, void *tmpl) __asm__(\"CreateFileA\");',\n"
+        "  'int SgdWriteFile(void *file, const char *buffer, uint32_t size, uint32_t *done, void *overlapped) __asm__(\"WriteFile\");',\n"
+        "  'uint32_t SgdSetFilePointer(void *file, int32_t distance, int32_t *high, uint32_t method) __asm__(\"SetFilePointer\");',\n"
+        "  'int SgdSetEndOfFile(void *file) __asm__(\"SetEndOfFile\");',\n", 'log handle declarations')
+    src = once(src, "  local f = io.open(LOGDIR .. '\\\\SmarterSEAF.log', 'w')\n  if not f then return end\n  f:write(table.concat(parts, '', 1, n))\n",
+        "  local text = table.concat(parts, '', 1, n)\n"
+        "  -- ((1.0.4) the file is opened once and kept open: each rewrite goes back to its start, writes, and cuts it to the new\n"
+        "  -- length (opening and closing it was ~2.2 ms a rewrite). If anything about that fails, back to opening and closing it)\n"
+        "  local h = session.log_handle\n"
+        "  if h == nil then\n"
+        "    h = K32.SgdCreateFileA(LOGDIR .. '\\\\SmarterSEAF.log', 0x40000000, 3, nil, 4, 0x80, nil)   -- (write; others may read and write; open or create)\n"
+        "    if h == nil or ffi.cast('intptr_t', h) == -1 then h = false end\n"
+        "    session.log_handle, session.log_done = h, ffi.new('uint32_t[1]')\n"
+        "  end\n"
+        "  if h then\n"
+        "    if K32.SgdSetFilePointer(h, 0, nil, 0) ~= 0xFFFFFFFF and K32.SgdWriteFile(h, text, #text, session.log_done, nil) ~= 0\n"
+        "      and session.log_done[0] == #text and K32.SgdSetEndOfFile(h) ~= 0 then return end\n"
+        "    pcall(K32.SgdCloseHandle, h); session.log_handle = false\n"
+        "  end\n"
+        "  local f = io.open(LOGDIR .. '\\\\SmarterSEAF.log', 'w')\n  if not f then return end\n  f:write(text)\n",
+        'log kept open')
+    # ((1.0.4 review) the kept-open log file is closed at shutdown, after its last write)
+    src = once(src, "  pcall(write_log)\n  if type(game_shutdown) == 'function' then return game_shutdown(...) end\n",
+        "  pcall(write_log)\n"
+        "  if session.log_handle then pcall(K32.SgdCloseHandle, session.log_handle); session.log_handle = false end\n"
+        "  if type(game_shutdown) == 'function' then return game_shutdown(...) end\n", 'log closed at shutdown')
+    # ((1.0.4) specialists don't put first the heavy enemies their EAT is never fired at (trooper_gun.lua marks them
+    # 'seaf_no_eat': Devastators, Scout Striders, Leviathans, Hive Lords); only specialists prefer 'heavy' in this build)
+    src = once(src, "    if a and not a.sentries_skip and a.av >= 4 then return 1 end\n",
+        "    if a and not a.sentries_skip and a.av >= 4 and not a.seaf_no_eat then return 1 end\n", 'heavy first without the EAT never-list')
     # (1.0.3, performance) map lookups from a per-frame snapshot: a component map looked up 3+ times in one frame is
     # read whole, once, into its own buffer (one system call instead of one per lookup and probe); its header is read
     # once a frame. Reset each frame and after the game's update (sentry_after). Tester: reads per frame in the log
@@ -373,7 +408,12 @@ def transform(src, version, tester, test_build, research):
     src = once(src, "    f:write(string.format('mod cost per frame (test): average %.3f ms, highest %.2f ms, over 1 ms in %d of %d frames\\n', T.sum / T.n, T.max, T.over, T.n))\n",
         "    f:write(string.format('mod cost per frame (test): average %.3f ms, highest %.2f ms, over 1 ms in %d of %d frames\\n', T.sum / T.n, T.max, T.over, T.n))\n"
         "    f:write(string.format('memory reads (test, since start): %.1f a frame (%.0f bytes); map snapshots %d (%.1f a frame, %.0f KB in all)\\n', RDN.n / T.n, RDN.b / T.n, RDN.snaps, RDN.snaps / T.n, RDN.snapb / 1024))\n"
-        "    f:write(string.format('relaxed pacing (test): %d soldier checks; %d with no target (checked 20 a second), %d with a target and nobody near him or his line (checked 30 a second)\\n', RDN.checked or 0, RDN.idle or 0, RDN.relaxed or 0))\n",
+        "    f:write(string.format('relaxed pacing (test): %d soldier checks; %d with no target (checked 20 a second), %d with a target and nobody near him or his line (checked 30 a second)\\n', RDN.checked or 0, RDN.idle or 0, RDN.relaxed or 0))\n"
+        "    local E = SGD.seaf_gun and SGD.seaf_gun.eatlog   -- ((1.0.4 review) the specialists' EATs)\n"
+        "    if E and E.draws > 0 then\n"
+        "      f:write(string.format('EATs (test): drawn %d times; %d with nothing heavy (or a structure) in sight, held %.1f s on average (longest %.1f s); fired %d (%d of them with nothing heavy in sight), put away %d (%d with nothing heavy in sight)\\n',\n"
+        "        E.draws, E.idle, E.idle > 0 and E.idle_s / E.idle or 0, E.idle_max, E.fired, E.fired_idle, E.put_away, E.put_away_idle))\n"
+        "    end\n",
         'reads line')
     src = once(src, "    laser.step = part('laser', laser.step)\n",
         "    laser.step = part('laser', laser.step)\n    if SGD.probe_step then SGD.probe_step = part('research (test builds)', SGD.probe_step) end\n", 'research part')
@@ -418,6 +458,14 @@ def transform(src, version, tester, test_build, research):
         "        local r = read(s.rec_addr, 28)\n"
         "        if not r or u32(r, 8) ~= s.st.node or u32(r, 24) ~= (s.st.friend_target or s.st.target) then skip = false end\n"
         "        -- (with a target: his barrel's line as it is now, near a friend - swung by a stagger, say - and he is checked in full)\n"
+        "        -- ((1.0.4) a specialist with his EAT out is checked every frame; one who still has it, with Armor Intelligence on: the\n"
+        "        -- weapon in his hands every frame too - drawn, he is checked in full straight away)\n"
+        "        if s.eat_out then skip = false end\n"
+        "        local HW = SGD.seaf_gun and SGD.seaf_gun.hand\n"
+        "        if skip and HW and s.def.eat == true and rawget(_G, 'SmarterSEAFArmor') == true then\n"
+        "          local okh, wid = pcall(HW, s)\n"
+        "          if not okh or wid ~= s.gun_wid then skip = false end\n"
+        "        end\n"
         "        local W = SGD.seaf_gun and SGD.seaf_gun.watch\n"
         "        if skip and not s.idle and W then\n"
         "          local okw, w = pcall(W, s, s.st, bodies, pbodies)\n"
