@@ -11,7 +11,7 @@ body:
     attributes:
       label: Mod version
       description: Shown at the top of the log and in your mod manager.
-      placeholder: "1.0.3"
+      placeholder: "1.0.4"
     validations:
       required: true
   - type: input
